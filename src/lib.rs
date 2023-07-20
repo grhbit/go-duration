@@ -7,7 +7,7 @@ use std::{
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{anychar, char, digit0, digit1},
+    character::complete::{char, digit0, digit1},
     combinator::{all_consuming, map_res, opt, value},
     multi::fold_many1,
     sequence::{pair, preceded, tuple},
@@ -115,9 +115,6 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64> {
                     value(NANOS_PER_SECOND, char('s')),
                     value(NANOS_PER_MINUTE, char('m')),
                     value(NANOS_PER_HOUR, char('h')),
-                    map_res(anychar, |_| {
-                        Err(nom::Err::Failure(ParseError::UnknownUnit("".to_string())))
-                    }),
                 )),
             ))
             .map(|((int, frac), scale)| {
@@ -141,9 +138,17 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64> {
     ))
     .map(|(sign, nanos): (bool, u64)| {
         if sign {
-            nanos as i64
+            if nanos <= i64::MAX as u64 {
+                nanos as i64
+            } else {
+                todo!()
+            }
         } else {
-            0i64.wrapping_sub_unsigned(nanos)
+            if let Some(nanos) = 0i64.checked_sub_unsigned(nanos) {
+                nanos
+            } else {
+                todo!()
+            }
         }
     })
     .parse(input)
