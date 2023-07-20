@@ -1,6 +1,5 @@
 use std::{
     fmt::{self, Write},
-    ops::Add,
     str::FromStr,
 };
 
@@ -133,7 +132,7 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64> {
                 int * scale + nanos
             }),
             || 0u64,
-            u64::add,
+            u64::saturating_add,
         ),
     ))
     .map(|(sign, nanos): (bool, u64)| {
@@ -173,9 +172,10 @@ mod tests {
             ("-2us", -2000),
             ("0.2us", 200),
             ("0.0000000000003h", 1),
-            ("0ns", 0),
             ("1ns", 1),
             ("1us", 1_000),
+            ("1\u{00B5}s", 1_000),
+            ("1\u{03BC}s", 1_000),
             ("1ms", 1_000_000),
             ("1s", 1_000_000_000),
             ("1m", 60_000_000_000),
@@ -185,7 +185,7 @@ mod tests {
         for (input, expected) in cases {
             let output = parse_go_duration(input);
             let (remaining, output) = output.unwrap();
-            assert!(remaining.len() == 0, "{input}");
+            assert!(remaining.is_empty(), "{input}");
             assert_eq!(expected, output, "{input}");
         }
     }
