@@ -1,22 +1,44 @@
 use std::{
     fmt::{self, Write},
+    ops::Index,
     str::FromStr,
 };
 
 use nom::{
     branch::alt,
-    bytes::complete::tag,
+    bytes::complete::{tag, take_till},
     character::complete::{char, digit0, digit1},
-    combinator::{all_consuming, map_res, opt, value},
+    combinator::{all_consuming, cut, map_res, opt, peek, recognize, value},
+    error::{FromExternalError, ParseError},
     multi::fold_many1,
     sequence::{pair, preceded, tuple},
     Finish, IResult, Parser,
 };
 
-pub enum ParseError {
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum DurationParseError {
+    #[error("time: invalid duration")]
     InvalidDuration,
+    #[error("time: missing unit in duration")]
     MissingUnit,
+    #[error("time: unknown unit {0} in duration")]
     UnknownUnit(String),
+}
+
+impl<I> ParseError<I> for DurationParseError {
+    fn from_error_kind(_input: I, _kind: nom::error::ErrorKind) -> Self {
+        DurationParseError::InvalidDuration
+    }
+
+    fn append(_input: I, _kind: nom::error::ErrorKind, other: Self) -> Self {
+        other
+    }
+}
+
+impl<I, E> FromExternalError<I, E> for DurationParseError {
+    fn from_external_error(_input: I, _kind: nom::error::ErrorKind, _e: E) -> Self {
+        DurationParseError::InvalidDuration
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -66,13 +88,12 @@ impl fmt::Display for GoDuration {
 }
 
 impl FromStr for GoDuration {
-    type Err = ParseError;
+    type Err = DurationParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         parse_go_duration(s)
             .finish()
             .map(|(_, nanos)| GoDuration { nanos })
-            .map_err(|_| ParseError::InvalidDuration)
     }
 }
 
@@ -82,81 +103,87 @@ const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const NANOS_PER_MINUTE: u64 = NANOS_PER_SECOND * 60;
 const NANOS_PER_HOUR: u64 = NANOS_PER_MINUTE * 60;
 
-fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>)> {
+fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>), DurationParseError> {
     alt((
-        preceded(char('.'), digit1).map(|frac| (0, Some(frac))),
+        preceded(char::<&str, DurationParseError>('.'), digit1).map(|frac| (0, Some(frac))),
         pair(
             map_res(digit1, str::parse::<u64>),
             opt(preceded(char('.'), digit0)),
         ),
-    ))
-    .parse(input)
+    ))(input)
 }
 
-fn sign(input: &str) -> IResult<&str, bool> {
+fn sign(input: &str) -> IResult<&str, bool, DurationParseError> {
     opt(alt((value(false, char('-')), value(true, char('+')))))
         .map(|sign| sign.unwrap_or(true))
         .parse(input)
 }
 
-pub fn parse_go_duration(input: &str) -> IResult<&str, i64> {
-    all_consuming(pair(
-        sign,
-        fold_many1(
-            tuple((
-                decimal_parts,
-                alt((
-                    value(1u64, tag("ns")),
-                    value(NANOS_PER_MICROSECOND, tag("\u{00B5}s")),
-                    value(NANOS_PER_MICROSECOND, tag("\u{03BC}s")),
-                    value(NANOS_PER_MICROSECOND, tag("us")),
-                    value(NANOS_PER_MILLISECOND, tag("ms")),
-                    value(NANOS_PER_SECOND, char('s')),
-                    value(NANOS_PER_MINUTE, char('m')),
-                    value(NANOS_PER_HOUR, char('h')),
-                )),
-            ))
-            .map(|((int, frac), scale)| {
-                let nanos = frac
-                    .map(|frac: &str| {
-                        let mut total = 0.0;
-                        let mut scale = scale as f64;
-                        for c in frac.chars() {
-                            scale /= 10.0;
-                            total += scale * c.to_digit(10).unwrap() as f64;
-                        }
-                        total = total.trunc();
-                        total as u64
-                    })
-                    .unwrap_or(0);
-                int * scale + nanos
-            }),
-            || 0u64,
-            u64::saturating_add,
-        ),
+fn unit(input: &str) -> IResult<&str, u64, DurationParseError> {
+    let (input, unit) = peek(take_till(|c: char| c.is_ascii_digit() || c == '.'))(input)?;
+    if unit.is_empty() {
+        return Err(nom::Err::Error(DurationParseError::MissingUnit));
+    }
+    let (input, (tagg, unit_scale)) = alt((
+        tag::<&str, &str, DurationParseError>("ns").map(|tag| (tag, 1u64)),
+        tag("\u{00B5}s").map(|tag| (tag, NANOS_PER_MICROSECOND)),
+        tag("\u{03BC}s").map(|tag| (tag, NANOS_PER_MICROSECOND)),
+        tag("us").map(|tag| (tag, NANOS_PER_MICROSECOND)),
+        tag("ms").map(|tag| (tag, NANOS_PER_MILLISECOND)),
+        tag("s").map(|tag| (tag, NANOS_PER_SECOND)),
+        tag("m").map(|tag| (tag, NANOS_PER_MINUTE)),
+        tag("h").map(|tag| (tag, NANOS_PER_HOUR)),
     ))
-    .map(|(sign, nanos): (bool, u64)| {
-        if sign {
-            if nanos <= i64::MAX as u64 {
-                nanos as i64
-            } else {
-                todo!()
-            }
-        } else {
-            if let Some(nanos) = 0i64.checked_sub_unsigned(nanos) {
-                nanos
-            } else {
-                todo!()
-            }
-        }
-    })
     .parse(input)
+    .map_err(|_| nom::Err::Error(DurationParseError::UnknownUnit(unit.to_string())))?;
+
+    if tagg != unit {
+        return Err(nom::Err::Error(DurationParseError::UnknownUnit(
+            unit.to_string(),
+        )));
+    }
+
+    Ok((input, unit_scale))
+}
+
+pub fn parse_go_duration(input: &str) -> IResult<&str, i64, DurationParseError> {
+    let (input, sign) = sign(input)?;
+    let (input, nanos) = all_consuming(fold_many1(
+        tuple((decimal_parts, cut(unit))).map(|((int, frac), scale)| {
+            let nanos = frac
+                .map(|frac: &str| {
+                    let mut total = 0.0;
+                    let mut scale = scale as f64;
+                    for c in frac.chars() {
+                        scale /= 10.0;
+                        total += scale * c.to_digit(10).unwrap() as f64;
+                    }
+                    total = total.trunc();
+                    total as u64
+                })
+                .unwrap_or(0);
+            int * scale + nanos
+        }),
+        || 0u64,
+        u64::saturating_add,
+    ))
+    .parse(input)?;
+
+    let nanos = if sign {
+        if nanos <= i64::MAX as u64 {
+            nanos as i64
+        } else {
+            return Err(nom::Err::Error(DurationParseError::InvalidDuration));
+        }
+    } else {
+        0i64.checked_sub_unsigned(nanos)
+            .ok_or(nom::Err::Error(DurationParseError::InvalidDuration))?
+    };
+    Ok((input, nanos))
 }
 
 #[cfg(test)]
 mod tests {
-    use nom::Finish;
-
     use super::*;
 
     #[test]
@@ -184,7 +211,7 @@ mod tests {
 
         for (input, expected) in cases {
             let output = parse_go_duration(input);
-            let (remaining, output) = output.unwrap();
+            let (remaining, output) = output.expect(&format!("{input}"));
             assert!(remaining.is_empty(), "{input}");
             assert_eq!(expected, output, "{input}");
         }
@@ -193,18 +220,19 @@ mod tests {
     #[test]
     fn parse_invalid() {
         let cases = [
-            ("0z", ParseError::UnknownUnit("z".to_string())),
-            ("0", ParseError::InvalidDuration),
-            ("-2", ParseError::InvalidDuration),
-            ("-1m-30s", ParseError::InvalidDuration),
-            ("1m-30s", ParseError::InvalidDuration),
-            ("1m+30s", ParseError::InvalidDuration),
-            ("-1m+30s", ParseError::InvalidDuration),
+            ("0", DurationParseError::MissingUnit),
+            ("-1m-30s", DurationParseError::UnknownUnit("m-".to_string())),
+            ("-2", DurationParseError::MissingUnit),
+            ("0z", DurationParseError::UnknownUnit("z".to_string())),
+            ("1m-30s", DurationParseError::UnknownUnit("m-".to_string())),
+            ("1m+30s", DurationParseError::UnknownUnit("m+".to_string())),
+            ("-1m+30s", DurationParseError::UnknownUnit("m+".to_string())),
         ];
 
-        for (input, _expected) in cases {
+        for (input, expected) in cases {
             let output = parse_go_duration(input).finish();
-            assert!(output.is_err(), "{input}");
+            assert!(output.is_err(), "{input} {output:?}");
+            assert_eq!(output.unwrap_err(), expected, "{input}");
         }
     }
 

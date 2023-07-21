@@ -9,3 +9,4 @@ edition = "2021"
 [dependencies]
 nom = { version = "7.1.3", default-features = false }
 serde = { version = "1.0.171", optional = false }
+thiserror = "1.0.43"
