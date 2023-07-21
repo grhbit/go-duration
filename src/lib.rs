@@ -3,6 +3,8 @@ use std::{
     str::FromStr,
 };
 
+#[cfg(feature = "serde")]
+use ::serde::{Deserialize, Serialize};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_till},
@@ -13,6 +15,9 @@ use nom::{
     sequence::{pair, preceded, tuple},
     Finish, IResult, Parser,
 };
+
+#[cfg(feature = "serde")]
+pub mod serde;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum GoDurationParseError {
@@ -40,7 +45,8 @@ impl<I, E> FromExternalError<I, E> for GoDurationParseError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GoDuration(pub i64);
 
 impl GoDuration {
@@ -181,7 +187,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_valid() {
+    fn test_parse_valid() {
         let cases = [
             ("0s", 0),
             ("+42ns", 42),
@@ -215,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_invalid() {
+    fn test_parse_invalid() {
         let cases = [
             ("0", GoDurationParseError::MissingUnit),
             (
@@ -263,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn format() {
+    fn test_format() {
         let cases = [
             (0, "0s"),
             (100, "100ns"),
