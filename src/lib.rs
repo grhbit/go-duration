@@ -41,13 +41,18 @@ impl<I, E> FromExternalError<I, E> for GoDurationParseError {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct GoDuration {
-    pub nanos: i64,
+pub struct GoDuration(pub i64);
+
+impl GoDuration {
+    #[inline]
+    pub fn nanoseconds(&self) -> i64 {
+        self.0
+    }
 }
 
 impl fmt::Display for GoDuration {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
-        let nanos = self.nanos;
+        let nanos = self.0;
         if nanos.is_negative() {
             f.write_char('-')?;
         }
@@ -90,9 +95,7 @@ impl FromStr for GoDuration {
     type Err = GoDurationParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_go_duration(s)
-            .finish()
-            .map(|(_, nanos)| GoDuration { nanos })
+        parse_go_duration(s).finish().map(|(_, dur)| dur)
     }
 }
 
@@ -138,7 +141,7 @@ fn unit(input: &str) -> IResult<&str, u64, GoDurationParseError> {
     Ok((input, unit))
 }
 
-pub fn parse_go_duration(input: &str) -> IResult<&str, i64, GoDurationParseError> {
+pub fn parse_go_duration(input: &str) -> IResult<&str, GoDuration, GoDurationParseError> {
     let (input, sign) = sign(input)?;
     let (input, nanos) = all_consuming(fold_many1(
         tuple((decimal_parts, cut(unit))).map(|((int, frac), scale)| {
@@ -170,7 +173,7 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64, GoDurationParseError
         0i64.checked_sub_unsigned(nanos)
             .ok_or(nom::Err::Error(GoDurationParseError::InvalidDuration))?
     };
-    Ok((input, nanos))
+    Ok((input, GoDuration(nanos)))
 }
 
 #[cfg(test)]
@@ -207,7 +210,7 @@ mod tests {
             let output = parse_go_duration(input);
             let (remaining, output) = output.expect(&format!("{input}"));
             assert!(remaining.is_empty(), "{input}");
-            assert_eq!(expected, output, "{input}");
+            assert_eq!(expected, output.0, "{input}");
         }
     }
 
@@ -276,7 +279,7 @@ mod tests {
             (i64::MAX, "2562047h47m16.854775807s"),
         ];
         for (input, expected) in cases {
-            let output = GoDuration { nanos: input }.to_string();
+            let output = GoDuration(input).to_string();
             assert_eq!(expected, output, "{input}");
         }
     }
