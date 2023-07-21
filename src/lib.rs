@@ -15,18 +15,18 @@ use nom::{
 };
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum DurationParseError {
+pub enum GoDurationParseError {
     #[error("time: invalid duration")]
     InvalidDuration,
     #[error("time: missing unit in duration")]
     MissingUnit,
-    #[error("time: unknown unit {0} in duration")]
+    #[error("time: unknown unit \"{0}\" in duration")]
     UnknownUnit(String),
 }
 
-impl<I> ParseError<I> for DurationParseError {
+impl<I> ParseError<I> for GoDurationParseError {
     fn from_error_kind(_input: I, _kind: nom::error::ErrorKind) -> Self {
-        DurationParseError::InvalidDuration
+        GoDurationParseError::InvalidDuration
     }
 
     fn append(_input: I, _kind: nom::error::ErrorKind, other: Self) -> Self {
@@ -34,9 +34,9 @@ impl<I> ParseError<I> for DurationParseError {
     }
 }
 
-impl<I, E> FromExternalError<I, E> for DurationParseError {
+impl<I, E> FromExternalError<I, E> for GoDurationParseError {
     fn from_external_error(_input: I, _kind: nom::error::ErrorKind, _e: E) -> Self {
-        DurationParseError::InvalidDuration
+        GoDurationParseError::InvalidDuration
     }
 }
 
@@ -87,7 +87,7 @@ impl fmt::Display for GoDuration {
 }
 
 impl FromStr for GoDuration {
-    type Err = DurationParseError;
+    type Err = GoDurationParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         parse_go_duration(s)
@@ -102,9 +102,9 @@ const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const NANOS_PER_MINUTE: u64 = NANOS_PER_SECOND * 60;
 const NANOS_PER_HOUR: u64 = NANOS_PER_MINUTE * 60;
 
-fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>), DurationParseError> {
+fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>), GoDurationParseError> {
     alt((
-        preceded(char::<&str, DurationParseError>('.'), digit1).map(|frac| (0, Some(frac))),
+        preceded(char::<&str, GoDurationParseError>('.'), digit1).map(|frac| (0, Some(frac))),
         pair(
             map_res(digit1, str::parse::<u64>),
             opt(preceded(char('.'), digit0)),
@@ -112,19 +112,19 @@ fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>), DurationPars
     ))(input)
 }
 
-fn sign(input: &str) -> IResult<&str, bool, DurationParseError> {
+fn sign(input: &str) -> IResult<&str, bool, GoDurationParseError> {
     opt(alt((value(false, char('-')), value(true, char('+')))))
         .map(|sign| sign.unwrap_or(true))
         .parse(input)
 }
 
-fn unit(input: &str) -> IResult<&str, u64, DurationParseError> {
+fn unit(input: &str) -> IResult<&str, u64, GoDurationParseError> {
     let (input, unit) = take_till(|c: char| c.is_ascii_digit() || c == '.')(input)?;
     if unit.is_empty() {
-        return Err(nom::Err::Error(DurationParseError::MissingUnit));
+        return Err(nom::Err::Error(GoDurationParseError::MissingUnit));
     }
     let (_, unit) = all_consuming(alt((
-        value(1u64, tag::<&str, &str, DurationParseError>("ns")),
+        value(1u64, tag::<&str, &str, GoDurationParseError>("ns")),
         value(NANOS_PER_MICROSECOND, tag("\u{00B5}s")),
         value(NANOS_PER_MICROSECOND, tag("\u{03BC}s")),
         value(NANOS_PER_MICROSECOND, tag("us")),
@@ -134,11 +134,11 @@ fn unit(input: &str) -> IResult<&str, u64, DurationParseError> {
         value(NANOS_PER_HOUR, char('h')),
     )))
     .parse(unit)
-    .map_err(|_| nom::Err::Error(DurationParseError::UnknownUnit(unit.to_string())))?;
+    .map_err(|_| nom::Err::Error(GoDurationParseError::UnknownUnit(unit.to_string())))?;
     Ok((input, unit))
 }
 
-pub fn parse_go_duration(input: &str) -> IResult<&str, i64, DurationParseError> {
+pub fn parse_go_duration(input: &str) -> IResult<&str, i64, GoDurationParseError> {
     let (input, sign) = sign(input)?;
     let (input, nanos) = all_consuming(fold_many1(
         tuple((decimal_parts, cut(unit))).map(|((int, frac), scale)| {
@@ -153,7 +153,7 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64, DurationParseError> 
                     total as u64
                 })
                 .unwrap_or(0);
-            int * scale + nanos
+            int.saturating_mul(scale).saturating_add(nanos)
         }),
         || 0u64,
         u64::saturating_add,
@@ -164,11 +164,11 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64, DurationParseError> 
         if nanos <= i64::MAX as u64 {
             nanos as i64
         } else {
-            return Err(nom::Err::Error(DurationParseError::InvalidDuration));
+            return Err(nom::Err::Error(GoDurationParseError::InvalidDuration));
         }
     } else {
         0i64.checked_sub_unsigned(nanos)
-            .ok_or(nom::Err::Error(DurationParseError::InvalidDuration))?
+            .ok_or(nom::Err::Error(GoDurationParseError::InvalidDuration))?
     };
     Ok((input, nanos))
 }
@@ -181,6 +181,7 @@ mod tests {
     fn parse_valid() {
         let cases = [
             ("0s", 0),
+            ("+42ns", 42),
             (".1us", 100),
             (".1ns0.9ns", 0),
             ("1ns9ns", 10),
@@ -198,6 +199,8 @@ mod tests {
             ("1s", 1_000_000_000),
             ("1m", 60_000_000_000),
             ("1h", 3_600_000_000_000),
+            ("9223372036854775807ns", 9_223_372_036_854_775_807),
+            ("-9223372036854775808ns", -9_223_372_036_854_775_808),
         ];
 
         for (input, expected) in cases {
@@ -211,19 +214,39 @@ mod tests {
     #[test]
     fn parse_invalid() {
         let cases = [
-            ("0", DurationParseError::MissingUnit),
-            ("-1m-30s", DurationParseError::UnknownUnit("m-".to_string())),
-            ("-2", DurationParseError::MissingUnit),
-            ("0z", DurationParseError::UnknownUnit("z".to_string())),
-            ("1m-30s", DurationParseError::UnknownUnit("m-".to_string())),
-            ("1m+30s", DurationParseError::UnknownUnit("m+".to_string())),
-            ("-1m+30s", DurationParseError::UnknownUnit("m+".to_string())),
-            ("9223372036854775808ns", DurationParseError::InvalidDuration),
-            ("-", DurationParseError::InvalidDuration),
-            (" ", DurationParseError::InvalidDuration),
-            ("1 m", DurationParseError::UnknownUnit(" m".to_string())),
-            ("1h ", DurationParseError::UnknownUnit("h ".to_string())),
-            (" 1s", DurationParseError::InvalidDuration),
+            ("0", GoDurationParseError::MissingUnit),
+            (
+                "-1m-30s",
+                GoDurationParseError::UnknownUnit("m-".to_string()),
+            ),
+            ("-2", GoDurationParseError::MissingUnit),
+            ("0z", GoDurationParseError::UnknownUnit("z".to_string())),
+            (
+                "1m-30s",
+                GoDurationParseError::UnknownUnit("m-".to_string()),
+            ),
+            (
+                "1m+30s",
+                GoDurationParseError::UnknownUnit("m+".to_string()),
+            ),
+            (
+                "-1m+30s",
+                GoDurationParseError::UnknownUnit("m+".to_string()),
+            ),
+            (
+                "9223372036854775808ns",
+                GoDurationParseError::InvalidDuration,
+            ),
+            (
+                "-9223372036854775809ns",
+                GoDurationParseError::InvalidDuration,
+            ),
+            ("-", GoDurationParseError::InvalidDuration),
+            ("+", GoDurationParseError::InvalidDuration),
+            (" ", GoDurationParseError::InvalidDuration),
+            ("-1 m", GoDurationParseError::UnknownUnit(" m".to_string())),
+            ("17h ", GoDurationParseError::UnknownUnit("h ".to_string())),
+            (" 42s", GoDurationParseError::InvalidDuration),
         ];
 
         for (input, expected) in cases {
