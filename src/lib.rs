@@ -1,6 +1,5 @@
 use std::{
     fmt::{self, Write},
-    ops::Index,
     str::FromStr,
 };
 
@@ -8,7 +7,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_till},
     character::complete::{char, digit0, digit1},
-    combinator::{all_consuming, cut, map_res, opt, peek, recognize, value},
+    combinator::{all_consuming, cut, map_res, opt, value},
     error::{FromExternalError, ParseError},
     multi::fold_many1,
     sequence::{pair, preceded, tuple},
@@ -120,30 +119,23 @@ fn sign(input: &str) -> IResult<&str, bool, DurationParseError> {
 }
 
 fn unit(input: &str) -> IResult<&str, u64, DurationParseError> {
-    let (input, unit) = peek(take_till(|c: char| c.is_ascii_digit() || c == '.'))(input)?;
+    let (input, unit) = take_till(|c: char| c.is_ascii_digit() || c == '.')(input)?;
     if unit.is_empty() {
         return Err(nom::Err::Error(DurationParseError::MissingUnit));
     }
-    let (input, (tagg, unit_scale)) = alt((
-        tag::<&str, &str, DurationParseError>("ns").map(|tag| (tag, 1u64)),
-        tag("\u{00B5}s").map(|tag| (tag, NANOS_PER_MICROSECOND)),
-        tag("\u{03BC}s").map(|tag| (tag, NANOS_PER_MICROSECOND)),
-        tag("us").map(|tag| (tag, NANOS_PER_MICROSECOND)),
-        tag("ms").map(|tag| (tag, NANOS_PER_MILLISECOND)),
-        tag("s").map(|tag| (tag, NANOS_PER_SECOND)),
-        tag("m").map(|tag| (tag, NANOS_PER_MINUTE)),
-        tag("h").map(|tag| (tag, NANOS_PER_HOUR)),
-    ))
-    .parse(input)
+    let (_, unit) = all_consuming(alt((
+        value(1u64, tag::<&str, &str, DurationParseError>("ns")),
+        value(NANOS_PER_MICROSECOND, tag("\u{00B5}s")),
+        value(NANOS_PER_MICROSECOND, tag("\u{03BC}s")),
+        value(NANOS_PER_MICROSECOND, tag("us")),
+        value(NANOS_PER_MILLISECOND, tag("ms")),
+        value(NANOS_PER_SECOND, char('s')),
+        value(NANOS_PER_MINUTE, char('m')),
+        value(NANOS_PER_HOUR, char('h')),
+    )))
+    .parse(unit)
     .map_err(|_| nom::Err::Error(DurationParseError::UnknownUnit(unit.to_string())))?;
-
-    if tagg != unit {
-        return Err(nom::Err::Error(DurationParseError::UnknownUnit(
-            unit.to_string(),
-        )));
-    }
-
-    Ok((input, unit_scale))
+    Ok((input, unit))
 }
 
 pub fn parse_go_duration(input: &str) -> IResult<&str, i64, DurationParseError> {
@@ -158,7 +150,6 @@ pub fn parse_go_duration(input: &str) -> IResult<&str, i64, DurationParseError> 
                         scale /= 10.0;
                         total += scale * c.to_digit(10).unwrap() as f64;
                     }
-                    total = total.trunc();
                     total as u64
                 })
                 .unwrap_or(0);
@@ -227,12 +218,21 @@ mod tests {
             ("1m-30s", DurationParseError::UnknownUnit("m-".to_string())),
             ("1m+30s", DurationParseError::UnknownUnit("m+".to_string())),
             ("-1m+30s", DurationParseError::UnknownUnit("m+".to_string())),
+            ("9223372036854775808ns", DurationParseError::InvalidDuration),
+            ("-", DurationParseError::InvalidDuration),
+            (" ", DurationParseError::InvalidDuration),
+            ("1 m", DurationParseError::UnknownUnit(" m".to_string())),
+            ("1h ", DurationParseError::UnknownUnit("h ".to_string())),
+            (" 1s", DurationParseError::InvalidDuration),
         ];
 
         for (input, expected) in cases {
             let output = parse_go_duration(input).finish();
             assert!(output.is_err(), "{input} {output:?}");
-            assert_eq!(output.unwrap_err(), expected, "{input}");
+
+            let output = output.unwrap_err();
+            assert_eq!(output, expected, "{input}");
+            println!("{}", output);
         }
     }
 
