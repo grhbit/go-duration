@@ -88,41 +88,55 @@ mod tests {
 
     #[test]
     fn test_de_error() {
+        assert_de_tokens_error::<GoDuration>(&[Token::U64(u64::MAX)], "time: invalid duration");
         assert_de_tokens_error::<GoDuration>(
-            &[
-                Token::U64(u64::MAX),
-            ],
-            "time: invalid duration",
+            &[Token::String("0")],
+            "time: missing unit in duration",
+        );
+        assert_de_tokens_error::<GoDuration>(
+            &[Token::String("10z")],
+            "time: unknown unit \"z\" in duration",
         );
     }
 
     #[derive(Debug, PartialEq, Deserialize, Serialize)]
     struct GoDurationTest {
         pub dur: GoDuration,
+        #[serde(with = "super::nanoseconds")]
+        pub nanos: GoDuration,
     }
 
     #[test]
     fn test_json_ser_de() -> Result<(), serde_json::Error> {
-        let output: GoDurationTest = serde_json::from_str(r#"{"dur":"20ns"}"#)?;
+        let output: GoDurationTest = serde_json::from_str(r#"{"dur":"20ns","nanos": 17}"#)?;
         let expected = GoDurationTest {
             dur: GoDuration(20),
+            nanos: GoDuration(17),
         };
         assert_eq!(expected, output);
 
         let output = serde_json::to_string(&output).unwrap();
-        let expected = r#"{"dur":"20ns"}"#;
+        let expected = r#"{"dur":"20ns","nanos":17}"#;
         assert_eq!(expected, output);
         Ok(())
     }
 
     #[test]
     fn test_json_de_error() {
-        let output = serde_json::from_str::<'_, GoDurationTest>(r#"{"dur":11}"#);
+        let output = serde_json::from_str::<'_, GoDurationTest>(r#"{"dur":11,"nanos":0}"#);
         assert!(output.is_err());
         let output = output.unwrap_err();
         assert_eq!(
             output.to_string(),
             "invalid type: integer `11`, expected Go-lang style `time.Duration` string at line 1 column 9",
+        );
+
+        let output = serde_json::from_str::<'_, GoDurationTest>(r#"{"dur":"0s","nanos":"2s"}"#);
+        assert!(output.is_err());
+        let output = output.unwrap_err();
+        assert_eq!(
+            output.to_string(),
+            "invalid type: string \"2s\", expected Go-lang style `time.Duration` string at line 1 column 24",
         );
     }
 }
