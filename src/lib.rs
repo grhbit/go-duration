@@ -50,9 +50,31 @@ impl<I, E> FromExternalError<I, E> for GoDurationParseError {
 pub struct GoDuration(pub i64);
 
 impl GoDuration {
+    pub const ZERO: Self = GoDuration(0);
+    pub const MIN: Self = GoDuration(i64::MIN);
+    pub const MAX: Self = GoDuration(i64::MAX);
+
     #[inline]
     pub fn nanoseconds(&self) -> i64 {
         self.0
+    }
+
+    pub fn abs(&self) -> Self {
+        Self(0i64.saturating_add_unsigned(self.0.unsigned_abs()))
+    }
+}
+
+impl TryFrom<&str> for GoDuration {
+    type Error = GoDurationParseError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<i64> for GoDuration {
+    fn from(nanoseconds: i64) -> Self {
+        Self(nanoseconds)
     }
 }
 
@@ -223,6 +245,7 @@ mod tests {
     #[test]
     fn test_parse_invalid() {
         let cases = [
+            ("", GoDurationParseError::InvalidDuration),
             ("0", GoDurationParseError::MissingUnit),
             (
                 "-1m-30s",
@@ -264,29 +287,76 @@ mod tests {
 
             let output = output.unwrap_err();
             assert_eq!(output, expected, "{input}");
-            println!("{}", output);
         }
     }
 
     #[test]
     fn test_format() {
         let cases = [
+            (4000 * NANOS_PER_SECOND as i64, "1h6m40s"),
+            (90 * NANOS_PER_MINUTE as i64, "1h30m0s"),
+            (-1, "-1ns"),
             (0, "0s"),
-            (100, "100ns"),
             (1, "1ns"),
-            (2, "2ns"),
-            (2000, "2\u{00B5}s"),
-            (-2000, "-2\u{00B5}s"),
-            (200, "200ns"),
-            (1, "1ns"),
-            (NANOS_PER_HOUR as i64, "1h0m0s"),
+            (NANOS_PER_MICROSECOND as i64 - 1, "999ns"),
+            (NANOS_PER_MICROSECOND as i64, "1\u{00B5}s"),
+            (NANOS_PER_MICROSECOND as i64 + 1, "1.001\u{00B5}s"),
+            (NANOS_PER_MILLISECOND as i64 - 1, "999.999\u{00B5}s"),
+            (NANOS_PER_MILLISECOND as i64, "1ms"),
+            (NANOS_PER_MILLISECOND as i64 + 1, "1.000001ms"),
+            (NANOS_PER_SECOND as i64 - 1, "999.999999ms"),
+            (NANOS_PER_SECOND as i64, "1s"),
+            (NANOS_PER_SECOND as i64 + 1, "1.000000001s"),
+            (NANOS_PER_MINUTE as i64 - 1, "59.999999999s"),
             (NANOS_PER_MINUTE as i64, "1m0s"),
+            (NANOS_PER_MINUTE as i64 + 1, "1m0.000000001s"),
+            (NANOS_PER_HOUR as i64 - 1, "59m59.999999999s"),
+            (NANOS_PER_HOUR as i64, "1h0m0s"),
+            (NANOS_PER_HOUR as i64 + 1, "1h0m0.000000001s"),
             (i64::MIN, "-2562047h47m16.854775808s"),
             (i64::MAX, "2562047h47m16.854775807s"),
         ];
         for (input, expected) in cases {
             let output = GoDuration(input).to_string();
             assert_eq!(expected, output, "{input}");
+        }
+    }
+
+    #[test]
+    fn test_try_from_trait() {
+        let output = GoDuration::try_from("42ns");
+        assert!(output.is_ok());
+        assert_eq!(GoDuration(42), output.unwrap());
+    }
+
+    #[test]
+    fn test_from_trait() {
+        let output = GoDuration::from(-23);
+        assert_eq!(GoDuration(-23), output);
+    }
+
+    #[test]
+    fn test_from_external_error_trait() {
+        let output = map_res(nom::combinator::rest, str::parse::<u64>)
+            .parse("invalid")
+            .finish();
+        assert!(output.is_err());
+        let output: GoDurationParseError = output.unwrap_err();
+        assert_eq!(output, GoDurationParseError::InvalidDuration);
+    }
+
+    #[test]
+    fn test_duration_abs() {
+        let cases = [
+            (i64::MIN, i64::MAX),
+            (i64::MAX, i64::MAX),
+            (0, 0),
+            (-42, 42),
+        ];
+
+        for (input, expected) in cases {
+            let output = GoDuration(input).abs();
+            assert_eq!(expected, output.nanoseconds(), "{input}");
         }
     }
 }
