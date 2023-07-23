@@ -3,19 +3,11 @@ use std::{
     str::FromStr,
 };
 
+use ::nom::{Parser, Finish};
 #[cfg(feature = "serde")]
 use ::serde::{Deserialize, Serialize};
-use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_till},
-    character::complete::{char, digit0, digit1},
-    combinator::{all_consuming, cut, map_res, opt, value},
-    error::{FromExternalError, ParseError},
-    multi::fold_many1,
-    sequence::{pair, preceded, tuple},
-    Finish, IResult, Parser,
-};
 
+pub mod nom;
 #[cfg(feature = "serde")]
 pub mod serde;
 
@@ -29,25 +21,12 @@ pub enum GoDurationParseError {
     UnknownUnit(String),
 }
 
-impl<I> ParseError<I> for GoDurationParseError {
-    fn from_error_kind(_input: I, _kind: nom::error::ErrorKind) -> Self {
-        GoDurationParseError::InvalidDuration
-    }
-
-    fn append(_input: I, _kind: nom::error::ErrorKind, other: Self) -> Self {
-        other
-    }
-}
-
-impl<I, E> FromExternalError<I, E> for GoDurationParseError {
-    fn from_external_error(_input: I, _kind: nom::error::ErrorKind, _e: E) -> Self {
-        GoDurationParseError::InvalidDuration
-    }
-}
-
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct GoDuration(pub i64);
+pub struct GoDuration(
+    /// nanoseconds
+    pub i64,
+);
 
 impl GoDuration {
     pub const ZERO: Self = GoDuration(0);
@@ -123,85 +102,18 @@ impl FromStr for GoDuration {
     type Err = GoDurationParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_go_duration(s).finish().map(|(_, dur)| dur)
+        parse_go_duration(s)
     }
 }
 
-const NANOS_PER_MICROSECOND: u64 = 1_000;
-const NANOS_PER_MILLISECOND: u64 = 1_000_000;
-const NANOS_PER_SECOND: u64 = 1_000_000_000;
-const NANOS_PER_MINUTE: u64 = NANOS_PER_SECOND * 60;
-const NANOS_PER_HOUR: u64 = NANOS_PER_MINUTE * 60;
+pub(crate) const NANOS_PER_MICROSECOND: u64 = 1_000;
+pub(crate) const NANOS_PER_MILLISECOND: u64 = 1_000_000;
+pub(crate) const NANOS_PER_SECOND: u64 = 1_000_000_000;
+pub(crate) const NANOS_PER_MINUTE: u64 = NANOS_PER_SECOND * 60;
+pub(crate) const NANOS_PER_HOUR: u64 = NANOS_PER_MINUTE * 60;
 
-fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>), GoDurationParseError> {
-    alt((
-        preceded(char::<&str, GoDurationParseError>('.'), digit1).map(|frac| (0, Some(frac))),
-        pair(
-            map_res(digit1, str::parse::<u64>),
-            opt(preceded(char('.'), digit0)),
-        ),
-    ))(input)
-}
-
-fn sign(input: &str) -> IResult<&str, bool, GoDurationParseError> {
-    opt(alt((value(false, char('-')), value(true, char('+')))))
-        .map(|sign| sign.unwrap_or(true))
-        .parse(input)
-}
-
-fn unit(input: &str) -> IResult<&str, u64, GoDurationParseError> {
-    let (input, unit) = take_till(|c: char| c.is_ascii_digit() || c == '.')(input)?;
-    if unit.is_empty() {
-        return Err(nom::Err::Error(GoDurationParseError::MissingUnit));
-    }
-    let (_, unit) = all_consuming(alt((
-        value(1u64, tag::<&str, &str, GoDurationParseError>("ns")),
-        value(NANOS_PER_MICROSECOND, tag("\u{00B5}s")),
-        value(NANOS_PER_MICROSECOND, tag("\u{03BC}s")),
-        value(NANOS_PER_MICROSECOND, tag("us")),
-        value(NANOS_PER_MILLISECOND, tag("ms")),
-        value(NANOS_PER_SECOND, char('s')),
-        value(NANOS_PER_MINUTE, char('m')),
-        value(NANOS_PER_HOUR, char('h')),
-    )))
-    .parse(unit)
-    .map_err(|_| nom::Err::Error(GoDurationParseError::UnknownUnit(unit.to_string())))?;
-    Ok((input, unit))
-}
-
-pub fn parse_go_duration(input: &str) -> IResult<&str, GoDuration, GoDurationParseError> {
-    let (input, sign) = sign(input)?;
-    let (input, nanos) = all_consuming(fold_many1(
-        tuple((decimal_parts, cut(unit))).map(|((int, frac), scale)| {
-            let nanos = frac
-                .map(|frac: &str| {
-                    let mut total = 0.0;
-                    let mut scale = scale as f64;
-                    for c in frac.chars() {
-                        scale /= 10.0;
-                        total += scale * c.to_digit(10).unwrap() as f64;
-                    }
-                    total as u64
-                })
-                .unwrap_or(0);
-            int.saturating_mul(scale).saturating_add(nanos)
-        }),
-        || 0u64,
-        u64::saturating_add,
-    ))
-    .parse(input)?;
-
-    let nanos = if sign {
-        if nanos <= i64::MAX as u64 {
-            nanos as i64
-        } else {
-            return Err(nom::Err::Error(GoDurationParseError::InvalidDuration));
-        }
-    } else {
-        0i64.checked_sub_unsigned(nanos)
-            .ok_or(nom::Err::Error(GoDurationParseError::InvalidDuration))?
-    };
-    Ok((input, GoDuration(nanos)))
+pub fn parse_go_duration(input: &str) -> Result<GoDuration, GoDurationParseError> {
+    nom::go_duration.parse(input).finish().map(|(_, dur)| dur)
 }
 
 #[cfg(test)]
@@ -236,8 +148,7 @@ mod tests {
 
         for (input, expected) in cases {
             let output = parse_go_duration(input);
-            let (remaining, output) = output.expect(&format!("{input}"));
-            assert!(remaining.is_empty(), "{input}");
+            let output = output.expect(&format!("{input}"));
             assert_eq!(expected, output.0, "{input}");
         }
     }
@@ -282,7 +193,7 @@ mod tests {
         ];
 
         for (input, expected) in cases {
-            let output = parse_go_duration(input).finish();
+            let output = parse_go_duration(input);
             assert!(output.is_err(), "{input} {output:?}");
 
             let output = output.unwrap_err();
@@ -333,16 +244,6 @@ mod tests {
     fn test_from_trait() {
         let output = GoDuration::from(-23);
         assert_eq!(GoDuration(-23), output);
-    }
-
-    #[test]
-    fn test_from_external_error_trait() {
-        let output = map_res(nom::combinator::rest, str::parse::<u64>)
-            .parse("invalid")
-            .finish();
-        assert!(output.is_err());
-        let output: GoDurationParseError = output.unwrap_err();
-        assert_eq!(output, GoDurationParseError::InvalidDuration);
     }
 
     #[test]

@@ -17,7 +17,7 @@ impl<'de> de::Visitor<'de> for GoDurationVisitor {
     type Value = GoDuration;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a formatted string")
+        formatter.write_str("Go-lang style `time.Duration` string")
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -89,7 +89,7 @@ mod tests {
         let output = output.unwrap_err();
         assert_eq!(
             output.to_string(),
-            "invalid type: integer `11`, expected a formatted string at line 1 column 9",
+            "invalid type: integer `11`, expected Go-lang style `time.Duration` string at line 1 column 9",
         );
     }
 }
