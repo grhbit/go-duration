@@ -4,8 +4,6 @@ use std::{
 };
 
 use ::nom::{Parser, Finish};
-#[cfg(feature = "serde")]
-use ::serde::{Deserialize, Serialize};
 
 pub mod nom;
 #[cfg(feature = "serde")]
@@ -21,7 +19,6 @@ pub enum GoDurationParseError {
     UnknownUnit(String),
 }
 
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GoDuration(
     /// nanoseconds

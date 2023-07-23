@@ -1,14 +1,23 @@
-use std::str::FromStr;
-
 use ::serde::{de, ser};
 
-use crate::GoDuration;
+use crate::{GoDuration, GoDurationParseError};
 
-pub fn serialize<S>(dur: &GoDuration, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: ser::Serializer,
-{
-    serializer.serialize_str(&dur.to_string())
+impl ser::Serialize for GoDuration {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        serializer.collect_str(&self)
+    }
+}
+
+impl<'de> de::Deserialize<'de> for GoDuration {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(GoDurationVisitor)
+    }
 }
 
 pub struct GoDurationVisitor;
@@ -20,19 +29,48 @@ impl<'de> de::Visitor<'de> for GoDurationVisitor {
         formatter.write_str("Go-lang style `time.Duration` string")
     }
 
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        GoDuration::from_str(v).map_err(E::custom)
+        Ok(Self::Value::from(value))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if value <= i64::MAX as u64 {
+            self.visit_i64(value as i64)
+        } else {
+            Err(E::custom(GoDurationParseError::InvalidDuration))
+        }
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Self::Value::try_from(value).map_err(E::custom)
     }
 }
 
-pub fn deserialize<'de, D>(deserializer: D) -> Result<GoDuration, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    deserializer.deserialize_str(GoDurationVisitor)
+pub mod nanoseconds {
+    use super::*;
+
+    pub fn serialize<S>(value: &GoDuration, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        serializer.serialize_i64(value.nanoseconds())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<GoDuration, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_i64(GoDurationVisitor)
+    }
 }
 
 #[cfg(test)]
@@ -45,26 +83,21 @@ mod tests {
     #[test]
     fn test_ser_de() {
         let dur = GoDuration(0);
-        assert_tokens(
-            &dur,
-            &[Token::NewtypeStruct { name: "GoDuration" }, Token::I64(0)],
-        );
+        assert_tokens(&dur, &[Token::String("0s")]);
     }
 
     #[test]
     fn test_de_error() {
         assert_de_tokens_error::<GoDuration>(
             &[
-                Token::NewtypeStruct { name: "GoDuration" },
                 Token::U64(u64::MAX),
             ],
-            "invalid value: integer `18446744073709551615`, expected i64",
+            "time: invalid duration",
         );
     }
 
     #[derive(Debug, PartialEq, Deserialize, Serialize)]
     struct GoDurationTest {
-        #[serde(with = "super")]
         pub dur: GoDuration,
     }
 
