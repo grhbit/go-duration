@@ -1,0 +1,23 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+
+[bans]
+multiple-versions = "warn"
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-DFS-2016",
+]
+confidence-threshold = 1.0
+
+[licenses.private]
+ignore = false
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
