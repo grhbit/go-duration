@@ -1,6 +1,6 @@
 # go-duration
 
-go-duration is parsing and formatting library for Go-lang style `time.Duration`.
+A parsing and formatting library for Go-lang style `time.Duration`.
 
 <!-- toc -->
 
@@ -18,10 +18,10 @@ Add `go_duration` as a dependency in Cargo.toml
 
 ```toml
 [dependencies]
-go_duration = "<version>"
+go-duration = "<version>"
 
 # enable `serde` feature to use serialization/deserialization via serde
-go_duration = { version = "<version>", features = ["serde"] }
+go-duration = { version = "<version>", features = ["serde"] }
 ```
 
 ## Examples

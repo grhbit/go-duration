@@ -1,10 +1,14 @@
 [package]
 name = "go-duration"
+description = "A parsing and formatting library for Go-lang style `time.Duration`."
 version = "0.1.0"
 edition = "2021"
 authors = ["Gwon Seonggwang <g.passcode@gmail.com>"]
 readme = "README.md"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/grhbit/go-duration"
+keywords = ["duration", "time"]
+categories = ["parser-implementations", "value-formatting"]
 
 [features]
 default = []
