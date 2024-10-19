@@ -2,6 +2,9 @@
 name = "go-duration"
 version = "0.1.0"
 edition = "2021"
+authors = ["Gwon Seonggwang <g.passcode@gmail.com>"]
+readme = "README.md"
+license = "MIT OR Apache-2.0"
 
 [features]
 default = []
