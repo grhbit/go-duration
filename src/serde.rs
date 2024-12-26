@@ -22,7 +22,7 @@ impl<'de> de::Deserialize<'de> for GoDuration {
 
 pub struct GoDurationVisitor;
 
-impl<'de> de::Visitor<'de> for GoDurationVisitor {
+impl de::Visitor<'_> for GoDurationVisitor {
     type Value = GoDuration;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -40,11 +40,9 @@ impl<'de> de::Visitor<'de> for GoDurationVisitor {
     where
         E: de::Error,
     {
-        if value <= i64::MAX as u64 {
-            self.visit_i64(value as i64)
-        } else {
-            Err(E::custom(GoDurationParseError::InvalidDuration))
-        }
+        i64::try_from(value)
+            .map(Self::Value::from)
+            .map_err(|_| E::custom(GoDurationParseError::InvalidDuration))
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -56,7 +54,8 @@ impl<'de> de::Visitor<'de> for GoDurationVisitor {
 }
 
 pub mod nanoseconds {
-    use super::*;
+    use super::{GoDuration, GoDurationVisitor};
+    use serde::{de, ser};
 
     pub fn serialize<S>(value: &GoDuration, serializer: S) -> Result<S::Ok, S::Error>
     where
