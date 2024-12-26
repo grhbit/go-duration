@@ -16,8 +16,10 @@ serde = ["dep:serde"]
 
 [dependencies]
 nom = { version = "7", default-features = false }
-serde = { version = "1", optional = true, features = ["derive"] }
-thiserror = "1"
+serde = { version = "1", default-features = false, optional = true, features = [
+    "derive",
+] }
+thiserror = "2"
 
 [dev-dependencies]
 serde_test = "1"
