@@ -145,7 +145,7 @@ mod tests {
 
         for (input, expected) in cases {
             let output = parse_go_duration(input);
-            let output = output.expect(&format!("{input}"));
+            let output = output.expect(input);
             assert_eq!(expected, output.0, "{input}");
         }
     }
