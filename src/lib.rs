@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-use ::nom::{Parser, Finish};
+use ::nom::{Finish, Parser};
 
 pub mod nom;
 #[cfg(feature = "serde")]
@@ -31,10 +31,12 @@ impl GoDuration {
     pub const MAX: Self = GoDuration(i64::MAX);
 
     #[inline]
+    #[must_use]
     pub fn nanoseconds(&self) -> i64 {
         self.0
     }
 
+    #[must_use]
     pub fn abs(&self) -> Self {
         Self(0i64.saturating_add_unsigned(self.0.unsigned_abs()))
     }

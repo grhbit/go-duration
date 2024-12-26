@@ -70,16 +70,15 @@ pub fn go_duration(input: &str) -> IResult<&str, GoDuration, GoDurationParseErro
     let (input, sign) = sign(input)?;
     let (input, nanos) = all_consuming(fold_many1(
         tuple((decimal_parts, cut(unit))).map(|((int, frac), scale)| {
-            let nanos = frac
-                .map_or(0, |frac: &str| {
-                    let mut total = 0.0;
-                    let mut scale = scale as f64;
-                    for c in frac.chars() {
-                        scale /= 10.0;
-                        total += scale * c.to_digit(10).unwrap() as f64;
-                    }
-                    total as u64
-                });
+            let nanos = frac.map_or(0, |frac: &str| {
+                let mut total = 0.0;
+                let mut scale = scale as f64;
+                for c in frac.chars() {
+                    scale /= 10.0;
+                    total += scale * c.to_digit(10).unwrap() as f64
+                }
+                total as u64
+            });
             int.saturating_mul(scale).saturating_add(nanos)
         }),
         || 0u64,
@@ -88,9 +87,7 @@ pub fn go_duration(input: &str) -> IResult<&str, GoDuration, GoDurationParseErro
     .parse(input)?;
 
     let nanos = if sign {
-        i64::try_from(nanos).map_err(|_| {
-            NomErr::Error(GoDurationParseError::InvalidDuration)
-        })?
+        i64::try_from(nanos).map_err(|_| NomErr::Error(GoDurationParseError::InvalidDuration))?
     } else {
         0i64.checked_sub_unsigned(nanos)
             .ok_or(NomErr::Error(GoDurationParseError::InvalidDuration))?
