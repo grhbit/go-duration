@@ -75,7 +75,7 @@ pub fn go_duration(input: &str) -> IResult<&str, GoDuration, GoDurationParseErro
                 let mut scale = scale as f64;
                 for c in frac.chars() {
                     scale /= 10.0;
-                    total += scale * c.to_digit(10).unwrap() as f64
+                    total += scale * f64::from(c.to_digit(10).unwrap());
                 }
                 total as u64
             });
