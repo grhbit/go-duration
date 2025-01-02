@@ -11,6 +11,11 @@ repository = "https://github.com/grhbit/go-duration"
 keywords = ["duration", "time"]
 categories = ["parser-implementations", "value-formatting"]
 rust-version = "1.66.1"
+exclude = [
+    "/.github",
+    "/cliff.toml",
+    "/deny.toml",
+]
 
 [features]
 default = []
