@@ -17,6 +17,9 @@ exclude = [
     "/deny.toml",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 serde = ["dep:serde"]
