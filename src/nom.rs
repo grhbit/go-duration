@@ -5,7 +5,7 @@ use ::nom::{
     combinator::{all_consuming, cut, map_res, opt, value},
     error::{FromExternalError, ParseError},
     multi::fold_many1,
-    sequence::{pair, preceded, tuple},
+    sequence::{pair, preceded},
     Err as NomErr, IResult, Parser,
 };
 
@@ -37,7 +37,8 @@ fn decimal_parts(input: &str) -> IResult<&str, (u64, Option<&str>), GoDurationPa
             map_res(digit1, str::parse::<u64>),
             opt(preceded(char('.'), digit0)),
         ),
-    ))(input)
+    ))
+    .parse(input)
 }
 
 fn sign(input: &str) -> IResult<&str, bool, GoDurationParseError> {
@@ -69,7 +70,7 @@ fn unit(input: &str) -> IResult<&str, u64, GoDurationParseError> {
 pub fn go_duration(input: &str) -> IResult<&str, GoDuration, GoDurationParseError> {
     let (input, sign) = sign(input)?;
     let (input, nanos) = all_consuming(fold_many1(
-        tuple((decimal_parts, cut(unit))).map(|((int, frac), scale)| {
+        (decimal_parts, cut(unit)).map(|((int, frac), scale)| {
             let nanos = frac.map_or(0, |frac: &str| {
                 let mut total = 0.0;
                 let mut scale = scale as f64;
