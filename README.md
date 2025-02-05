@@ -18,10 +18,10 @@ Add `go_duration` as a dependency in Cargo.toml
 
 ```toml
 [dependencies]
-go-duration = "0.1"
+go-duration = "0.2"
 
 # enable `serde` feature to use serialization/deserialization via serde
-go-duration = { version = "0.1", features = ["serde"] }
+go-duration = { version = "0.2", features = ["serde"] }
 ```
 
 ## Examples
